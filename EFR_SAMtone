@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jan 29 21:54:38 2022
+
+@author: samhauser
+"""
+
+# Add MNE-python and ANLffr to the path first
+import sys
+import warnings
+
+sys.path.append('/Users/samhauser/Desktop/SNAPLab/mne-python/')
+sys.path.append('/Users/samhauser/Desktop/SNAPLab/ANLffr/')
+
+# Import MNE and ANLffr
+import mne
+from anlffr.helper import biosemi2mne as bs
+from matplotlib import pyplot as plt
+import numpy as np
+import os
+import fnmatch
+import pylab as pl
+import anlffr
+from anlffr import spectral
+from scipy import io
+
+warnings.filterwarnings('ignore')
+warnings.simplefilter('ignore')
+plt.rcParams['figure.figsize'] = [12, 8]
+plt.rcParams['figure.dpi'] = 120
+
+# Load the dataset you want to analyze
+datapath = '/Users/samhauser/Library/CloudStorage/Box-Box/SNAPlab Data Archive/Sam/AM Detection/'
+
+subj = 'PilotAS'
+fpath = datapath +'EFR_' +subj+ '.bdf'
+
+condlist = [[1, 3], [2, 4]]# 19+, 19-, 223+, 223-
+condnames = ['19Hz', '223Hz'] #modulation frequencies 
+
+
+# Loads in the data
+(raw, eves) = bs.importbdf(fpath, refchans=['EXG1', 'EXG2'])
+
+# raw.apply_proj()
+fs = raw.info['sfreq']
+
+raw.filter(l_freq=0, h_freq=1000)
+
+for k, cond in enumerate(condlist):
+    epochs = mne.Epochs(
+        raw, eves, cond, tmin=-0.025, proj=False,
+        tmax=1.025, baseline=(-0.025, 0.0),
+        reject=dict(eeg=200e-6))  # 200 regular, 50 strict
+    
+    xtemp = epochs.get_data()
+    
+    if(xtemp.shape[0] > 0):
+        xtemp = xtemp.transpose((1, 0, 2))
+        xtemp = xtemp[:15, :, :]
+        if(k == 0):
+            x = xtemp
+        else:
+            x = np.concatenate((x, xtemp), axis=1)
+    else:
+        continue
+    
+    nPerDraw = 400
+    nDraws = 100
+    params = dict(Fs=fs, fpass=[5, 1000], tapers=[1, 1], Npairs=2000,
+                  itc=1, nfft=32768)
+
+    Ntrials = x.shape[1] 
+    
+
+    
+    print('Running Mean Spectrum Estimation')
+    (S, N, f) = spectral.mtspec(x, params, verbose=True)
+    
+    print('Running CPCA PLV Estimation')
+    (cplv, f) = spectral.mtcpca(x, params, verbose=True)
+    
+    print ('Running channel by channel PLV Estimation')
+    (plv, f) = spectral.mtplv(x, params, verbose=True)
+    
+    print ('Running CPCA Power Estimation')
+    (cpow, f) = spectral.mtcspec(x, params, verbose=True)
+    
+    print ('Running raw spectrum estimation')
+    (Sraw, f) = spectral.mtspecraw(x, params, verbose=True)
+    
+    res = dict(cpow=cpow, plv=plv, cplv=cplv, Sraw=Sraw,
+               f=f, S=S, N=N, Ntrials=Ntrials)
+
+t = epochs.times * 1e3 - 1.6
+y=epochs.average()
+y = y.data
+chanlist = [31]
+for k, chan in enumerate(chanlist):
+    pl.plot(t, y[chan, :], linewidth = 1, label = chan)
+    pl.xlabel('Time (ms)')
+    pl.ylabel('EFR (uV)')
+    pl.legend(loc="upper left")
+
+
+    plotStuff = True
+    if plotStuff:
+        pl.figure()
+        pl.plot(f, plv.T[:,], linewidth=2)
+        pl.xlabel('Frequency (Hz)', fontsize=16)
+        pl.ylabel('Phase Locking', fontsize=16)
+        pl.legend()
+        ax = pl.gca()
+        ax.set_xlim([0, 1000])
+        ax.tick_params(labelsize=16)
+        
+        pl.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
